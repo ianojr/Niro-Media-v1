@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-lux-pink: var(--theme-pink);
+  --color-lux-lightpink: var(--theme-lightpink);
+  --color-lux-peach: var(--theme-peach);
+  --color-lux-yellow: var(--theme-yellow);
+}
+
+:root {
+  --theme-pink: #FE81D4;
+  --theme-lightpink: #FAACBF;
+  --theme-peach: #FBC3C1;
+  --theme-yellow: #FFEABB;
+}
+
+@layer utilities {
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag-region {
+    -webkit-app-region: no-drag;
+  }
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: transparent;
+  overflow: hidden;
+  font-family: 'Funnel Display', sans-serif;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+}
