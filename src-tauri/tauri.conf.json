@@ -16,7 +16,7 @@
         "width": 1024,
         "height": 720,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "minWidth": 400,
         "minHeight": 300,
         "theme": "Dark"
