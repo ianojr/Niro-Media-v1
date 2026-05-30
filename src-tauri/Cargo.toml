@@ -26,15 +26,18 @@ tauri-plugin-dialog = "2"
 tauri-plugin-os = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-fs = "2"
-libmpv = "2.0.1"
 raw-window-handle = "0.6.2"
 regex = "1.10"
 tauri-plugin-global-shortcut = "2"
 reqwest = { version = "0.12", features = ["stream"] }
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
+libmpv2 = "6.0.0"
 
 [features]
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56.0"
+
+[patch.crates-io]
+libmpv2 = { path = "libmpv2-patched" }

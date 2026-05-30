@@ -8,7 +8,7 @@ use player::{
     set_subtitle_speed, set_subtitle_track, set_volume, toggle_play, toggle_pause, PlayerState,
     set_chapter, next_chapter, previous_chapter,
     set_audio_track, set_audio_delay, set_audio_channels, set_audio_filter,
-    set_video_color, set_panscan, toggle_deinterlace, take_screenshot,
+    set_video_color, set_panscan, toggle_deinterlace, take_screenshot, set_property_string,
 };
 
 mod history;
@@ -146,6 +146,8 @@ pub fn run() {
             set_panscan,
             toggle_deinterlace,
             take_screenshot,
+            player::set_tone_mapping,
+            player::set_property_string,
             get_custom_themes,
             start_transcode,
             check_dependency,
