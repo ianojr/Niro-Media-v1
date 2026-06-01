@@ -20,7 +20,25 @@ export default function App() {
   const [showChapters, setShowChapters] = useState(false);
   const [showTracks, setShowTracks] = useState(false);
   const [vformat, setVformat] = useState("Loading");
+  const [isIdle, setIsIdle] = useState(false);
+  const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appWindow = getCurrentWindow();
+
+  useEffect(() => {
+    const handleMouseMove = () => {
+      setIsIdle(false);
+      if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+      idleTimeoutRef.current = setTimeout(() => {
+        setIsIdle(true);
+      }, 3000); // 3 seconds to hide UI
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const unlistenTime = listen<any>("time-update", (e) => {
@@ -95,13 +113,13 @@ export default function App() {
 
   return (
     <div 
-      className={`relative w-full h-screen text-[var(--text-primary)] flex flex-col items-center justify-center font-sans overflow-hidden transition-colors duration-1000 ${hasMedia ? 'bg-transparent' : 'bg-[var(--theme-base)]'}`}
+      className={`relative w-full h-screen text-[var(--text-primary)] flex flex-col items-center justify-center font-sans overflow-hidden transition-colors duration-1000 ${hasMedia ? 'bg-transparent' : 'bg-[var(--theme-base)]'} ${isIdle && hasMedia ? 'cursor-none' : ''}`}
       onClick={handleBackgroundClick}
       onDoubleClick={handleBackgroundDoubleClick}
     >
       
       {/* Titlebar Drag Region and Window Controls */}
-      <div data-tauri-drag-region className="absolute top-0 w-full h-12 z-[60] drag-region flex justify-end items-center px-6 gap-3">
+      <div data-tauri-drag-region className={`absolute top-0 w-full h-12 z-[60] drag-region flex justify-end items-center px-6 gap-3 transition-opacity duration-500 ${isIdle && hasMedia ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button 
           className="no-drag-region w-[14px] h-[14px] rounded-full bg-[var(--color-yellow)] opacity-60 hover:opacity-100 hover:scale-110 transition-all cursor-pointer flex items-center justify-center shadow-[0_0_10px_rgba(254,236,129,0.3)]"
           onClick={async (e) => { e.stopPropagation(); await appWindow.minimize(); }}
@@ -111,11 +129,10 @@ export default function App() {
           className="no-drag-region w-[14px] h-[14px] rounded-full bg-[var(--color-peach)] opacity-60 hover:opacity-100 hover:scale-110 transition-all cursor-pointer flex items-center justify-center shadow-[0_0_10px_rgba(254,166,129,0.3)]"
           onClick={async (e) => { 
             e.stopPropagation(); 
-            const isMax = await appWindow.isMaximized();
-            if (isMax) await appWindow.unmaximize();
-            else await appWindow.maximize();
+            const isFull = await appWindow.isFullscreen();
+            await appWindow.setFullscreen(!isFull);
           }}
-          title="Maximize"
+          title="Fullscreen"
         />
         <button 
           className="no-drag-region w-[14px] h-[14px] rounded-full bg-[var(--color-pink)] opacity-60 hover:opacity-100 hover:scale-110 transition-all cursor-pointer flex items-center justify-center shadow-[0_0_10px_rgba(254,129,212,0.3)]"
@@ -222,6 +239,7 @@ export default function App() {
             setShowChapters={setShowChapters}
             showTracks={showTracks}
             setShowTracks={setShowTracks}
+            isIdle={isIdle}
           />
         </>
       )}

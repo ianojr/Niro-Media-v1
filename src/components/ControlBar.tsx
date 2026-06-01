@@ -18,7 +18,8 @@ export default function ControlBar({
   showChapters,
   setShowChapters,
   showTracks,
-  setShowTracks
+  setShowTracks,
+  isIdle
 }: {
   showSettings: boolean;
   setShowSettings: (s: boolean) => void;
@@ -26,6 +27,7 @@ export default function ControlBar({
   setShowChapters: (s: boolean) => void;
   showTracks: boolean;
   setShowTracks: (s: boolean) => void;
+  isIdle: boolean;
 }) {
   const appWindow = getCurrentWindow();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -217,10 +219,10 @@ export default function ControlBar({
   return (
     <motion.div
       initial={{ opacity: 0, y: 50 }}
-      animate={{ opacity: 1, y: 0 }}
+      animate={{ opacity: isIdle ? 0 : 1, y: isIdle ? 50 : 0 }}
       exit={{ opacity: 0, y: 50 }}
       transition={{ type: "spring", stiffness: 200, damping: 20 }}
-      className="absolute bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-5xl z-50 glass-panel rounded-3xl p-4 flex items-center gap-6 no-drag-region"
+      className={`absolute bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-5xl z-50 glass-panel rounded-3xl p-4 flex items-center gap-6 no-drag-region ${isIdle ? 'pointer-events-none' : ''}`}
     >
       <button
         onClick={togglePlayPause}
