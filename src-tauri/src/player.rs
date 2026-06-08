@@ -20,6 +20,13 @@ pub struct Telemetry {
     pub vformat: String,
     pub vid: String,
     pub sig_peak: f64,
+    pub fps: f64,
+    pub dropped_frames: i64,
+    pub av_sync: f64,
+    pub playlist_pos: i64,
+    pub playlist_count: i64,
+    pub current_filename: String,
+    pub upscale_mode: String,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -28,6 +35,13 @@ pub struct Track {
     pub kind: String,
     pub title: String,
     pub lang: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct PlaylistItem {
+    pub index: i64,
+    pub filename: String,
+    pub current: bool,
 }
 
 pub struct PlayerState {
@@ -79,6 +93,17 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
         // Safe cache sizes (in MiB instead of bytes to avoid parse errors)
         let _ = mpv.set_property("demuxer-max-bytes", 1024 * 1024 * 250); // 250MB
         let _ = mpv.set_property("framedrop", "vo"); 
+
+        // A/V sync and performance hardening
+        let _ = mpv.set_property("video-sync", "display-resample");
+        let _ = mpv.set_property("interpolation", "yes");
+        let _ = mpv.set_property("tscale", "oversample");
+        let _ = mpv.set_property("correct-pts", "yes");
+        let _ = mpv.set_property("vd-lavc-dr", "yes");
+        let _ = mpv.set_property("demuxer-max-back-bytes", 1024 * 1024 * 128); // 128MB
+        let _ = mpv.set_property("audio-display", "no");
+        let _ = mpv.set_property("video-sync-max-audio-change", 0.025);
+        let _ = mpv.set_property("video-sync-max-video-change", 0.025);
         
         // Network Streaming
         mpv.set_property("ytdl", "yes").unwrap_or(());
@@ -129,6 +154,12 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
         let _ = mpv.observe_property("hwdec-current", libmpv2::Format::String, 0);
         let _ = mpv.observe_property("video-format", libmpv2::Format::String, 0);
         let _ = mpv.observe_property("video-params/sig-peak", libmpv2::Format::Double, 0);
+        let _ = mpv.observe_property("estimated-vf-fps", libmpv2::Format::Double, 0);
+        let _ = mpv.observe_property("decoder-frame-drop-count", libmpv2::Format::Int64, 0);
+        let _ = mpv.observe_property("avsync", libmpv2::Format::Double, 0);
+        let _ = mpv.observe_property("playlist-pos", libmpv2::Format::Int64, 0);
+        let _ = mpv.observe_property("playlist-count", libmpv2::Format::Int64, 0);
+        let _ = mpv.observe_property("filename", libmpv2::Format::String, 0);
 
         let mut corrupt_count = 0;
         let mut current_path = String::new();
@@ -139,6 +170,13 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
         let mut current_vformat = String::from("Unknown");
         let mut current_vid = String::from("no");
         let mut current_sig_peak = 0.0;
+        let mut current_fps = 0.0;
+        let mut current_dropped: i64 = 0;
+        let mut current_av_sync = 0.0;
+        let mut current_playlist_pos: i64 = -1;
+        let mut current_playlist_count: i64 = 0;
+        let mut current_filename = String::new();
+        let mut current_upscale_mode = String::from("off");
 
         loop {
             // Process incoming commands
@@ -195,6 +233,39 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
                                 current_sig_peak = val;
                                 updated = true;
                             }
+                        } else if name == "estimated-vf-fps" {
+                            if let libmpv2::events::PropertyData::Double(val) = change {
+                                current_fps = val;
+                                updated = true;
+                            }
+                        } else if name == "decoder-frame-drop-count" {
+                            if let libmpv2::events::PropertyData::Int64(val) = change {
+                                current_dropped = val;
+                                updated = true;
+                            }
+                        } else if name == "avsync" {
+                            if let libmpv2::events::PropertyData::Double(val) = change {
+                                current_av_sync = val;
+                                updated = true;
+                            }
+                        } else if name == "playlist-pos" {
+                            if let libmpv2::events::PropertyData::Int64(val) = change {
+                                current_playlist_pos = val;
+                                updated = true;
+                                // Emit playlist update
+                                emit_playlist_update(&mpv, &app_clone, val, current_playlist_count);
+                            }
+                        } else if name == "playlist-count" {
+                            if let libmpv2::events::PropertyData::Int64(val) = change {
+                                current_playlist_count = val;
+                                updated = true;
+                                emit_playlist_update(&mpv, &app_clone, current_playlist_pos, val);
+                            }
+                        } else if name == "filename" {
+                            if let libmpv2::events::PropertyData::Str(val) = change {
+                                current_filename = val.to_string();
+                                updated = true;
+                            }
                         }
                         
                         if updated {
@@ -206,6 +277,13 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
                                 vformat: current_vformat.clone(),
                                 vid: current_vid.clone(),
                                 sig_peak: current_sig_peak,
+                                fps: current_fps,
+                                dropped_frames: current_dropped,
+                                av_sync: current_av_sync,
+                                playlist_pos: current_playlist_pos,
+                                playlist_count: current_playlist_count,
+                                current_filename: current_filename.clone(),
+                                upscale_mode: current_upscale_mode.clone(),
                             });
                         }
                     },
@@ -260,7 +338,7 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
                         let text_lower = text.to_lowercase();
                         if text_lower.contains("invalid nal") || text_lower.contains("corrupt") || text_lower.contains("truncated") || text_lower.contains("error while decoding") {
                             corrupt_count += 1;
-                            if corrupt_count > 3 {
+                            if corrupt_count > 10 {
                                 // Pause playback
                                 let _ = mpv.set_property("pause", true);
                                 // Emit Tauri event
@@ -278,6 +356,26 @@ pub fn init_player(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn emit_playlist_update(mpv: &Mpv, app: &AppHandle, pos: i64, count: i64) {
+    let mut items = Vec::new();
+    for i in 0..count {
+        let filename = mpv.get_property::<String>(&format!("playlist/{}/filename", i))
+            .unwrap_or_default();
+        // Extract just the basename
+        let basename = std::path::Path::new(&filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&filename)
+            .to_string();
+        items.push(PlaylistItem {
+            index: i,
+            filename: basename,
+            current: i == pos,
+        });
+    }
+    let _ = app.emit("playlist-updated", items);
+}
+
 fn send_cmd(app: &AppHandle, cmd: Vec<String>) -> Result<(), String> {
     let state = app.state::<PlayerState>();
     if let Some(tx) = state.cmd_tx.lock().unwrap().as_ref() {
@@ -288,6 +386,13 @@ fn send_cmd(app: &AppHandle, cmd: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn load_media(app: AppHandle, path: String) -> Result<(), String> {
+    // Allow local files and common streaming protocols
+    if !path.starts_with("http://") && !path.starts_with("https://") {
+        let p = std::path::Path::new(&path);
+        if !p.is_absolute() {
+            return Err("Only absolute file paths are allowed".to_string());
+        }
+    }
     send_cmd(&app, vec!["loadfile".to_string(), path])
 }
 
@@ -334,6 +439,15 @@ pub fn set_subtitle_delay(app: AppHandle, delay: f64) -> Result<(), String> {
 #[tauri::command]
 pub fn set_subtitle_speed(app: AppHandle, speed: f64) -> Result<(), String> {
     send_cmd(&app, vec!["set_property".to_string(), "sub-speed".to_string(), speed.to_string()])
+}
+
+#[tauri::command]
+pub fn load_subtitle(app: AppHandle, path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() || !p.exists() {
+        return Err("Subtitle file not found".to_string());
+    }
+    send_cmd(&app, vec!["sub-add".to_string(), path, "auto".to_string()])
 }
 
 #[tauri::command]
@@ -399,5 +513,107 @@ pub fn set_tone_mapping(app: AppHandle, mapping: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn set_property_string(app: AppHandle, name: String, value: String) -> Result<(), String> {
+    const ALLOWED: &[&str] = &[
+        "hwdec", "deband", "deband-iterations", "deband-threshold",
+        "interpolation", "video-sync", "tscale",
+        "scale", "dscale", "cscale",
+        "sigmoid-upscaling", "correct-downscaling",
+        "linear-downscaling", "linear-upscaling",
+        "tone-mapping", "deinterlace", "lavfi-complex",
+    ];
+    if !ALLOWED.contains(&name.as_str()) {
+        return Err(format!("Property '{}' is not in the allowed list", name));
+    }
     send_cmd(&app, vec!["set_property".to_string(), name, value])
+}
+
+#[tauri::command]
+pub fn playlist_load_multiple(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // First file replaces current playback
+    send_cmd(&app, vec!["loadfile".to_string(), paths[0].clone(), "replace".to_string()])?;
+    // Remaining files are appended to the playlist
+    for path in paths.iter().skip(1) {
+        send_cmd(&app, vec!["loadfile".to_string(), path.clone(), "append".to_string()])?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playlist_append_multiple(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    for path in paths.iter() {
+        send_cmd(&app, vec!["loadfile".to_string(), path.clone(), "append-play".to_string()])?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playlist_next(app: AppHandle) -> Result<(), String> {
+    send_cmd(&app, vec!["playlist-next".to_string()])
+}
+
+#[tauri::command]
+pub fn playlist_prev(app: AppHandle) -> Result<(), String> {
+    send_cmd(&app, vec!["playlist-prev".to_string()])
+}
+
+#[tauri::command]
+pub fn playlist_clear(app: AppHandle) -> Result<(), String> {
+    send_cmd(&app, vec!["playlist-clear".to_string()])
+}
+
+#[tauri::command]
+pub fn playlist_play_index(app: AppHandle, index: i64) -> Result<(), String> {
+    send_cmd(&app, vec!["set_property".to_string(), "playlist-pos".to_string(), index.to_string()])
+}
+
+#[tauri::command]
+pub fn playlist_remove(app: AppHandle, index: i64) -> Result<(), String> {
+    send_cmd(&app, vec!["playlist-remove".to_string(), index.to_string()])
+}
+
+#[tauri::command]
+pub fn set_upscale_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    match mode.as_str() {
+        "fsr" => {
+            // FSR-quality upscaling using mpv's built-in high-quality scalers
+            send_cmd(&app, vec!["set_property".to_string(), "scale".to_string(), "ewa_lanczossharp".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "dscale".to_string(), "mitchell".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "cscale".to_string(), "ewa_lanczossharp".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "sigmoid-upscaling".to_string(), "yes".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "correct-downscaling".to_string(), "yes".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "linear-downscaling".to_string(), "no".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "linear-upscaling".to_string(), "no".to_string()])?;
+            Ok(())
+        },
+        "anime4k" => {
+            // Anime-optimized upscaling: sharper edges for drawn content
+            send_cmd(&app, vec!["set_property".to_string(), "scale".to_string(), "ewa_lanczos".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "dscale".to_string(), "mitchell".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "cscale".to_string(), "ewa_lanczos".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "sigmoid-upscaling".to_string(), "yes".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "correct-downscaling".to_string(), "yes".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "deband".to_string(), "yes".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "deband-iterations".to_string(), "4".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "deband-threshold".to_string(), "48".to_string()])?;
+            Ok(())
+        },
+        _ => {
+            // Reset to mpv defaults
+            send_cmd(&app, vec!["set_property".to_string(), "scale".to_string(), "bilinear".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "dscale".to_string(), "bilinear".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "cscale".to_string(), "bilinear".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "sigmoid-upscaling".to_string(), "no".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "correct-downscaling".to_string(), "no".to_string()])?;
+            send_cmd(&app, vec!["set_property".to_string(), "deband".to_string(), "no".to_string()])?;
+            Ok(())
+        }
+    }
+}
+
+#[tauri::command]
+pub fn set_upscale_sharpness(app: AppHandle, value: f64) -> Result<(), String> {
+    send_cmd(&app, vec!["set_property".to_string(), "sigmoid-upscaling".to_string(), if value > 0.0 { "yes".to_string() } else { "no".to_string() }])
 }

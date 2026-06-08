@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
+import { X, Sparkles } from "lucide-react";
 import "../App.css";
 
 export default function SettingsPanel({
@@ -14,6 +14,9 @@ export default function SettingsPanel({
 
   const [videoProfile, setVideoProfile] = useState("standard");
   const [audioProfile, setAudioProfile] = useState("pure");
+
+  const [upscaleMode, setUpscaleMode] = useState("off");
+  const [sharpness, setSharpness] = useState(50);
   
   const [hwdec, setHwdec] = useState(true);
   const [deband, setDeband] = useState(false);
@@ -170,6 +173,60 @@ export default function SettingsPanel({
 
           <div className="space-y-8 flex-1 overflow-y-auto pr-2 custom-scrollbar">
             
+            {/* GPU Upscaling */}
+            <div className="space-y-4">
+              <h3 className="text-[10px] font-bold tracking-[0.2em] text-[var(--color-pink)] uppercase border-b border-[rgba(255,255,255,0.1)] pb-2 flex items-center gap-2">
+                <Sparkles size={12} /> GPU Upscaling
+              </h3>
+
+              <div className="flex gap-2">
+                {[
+                  { label: "Off", value: "off" },
+                  { label: "FSR 1.0", value: "fsr" },
+                  { label: "Anime4K", value: "anime4k" },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    onClick={async () => {
+                      setUpscaleMode(mode.value);
+                      await invoke("set_upscale_mode", { mode: mode.value });
+                      showOsd(`Upscaling: ${mode.label}`);
+                      resetTimeout();
+                    }}
+                    className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-bold tracking-widest uppercase transition-all cursor-pointer border ${
+                      upscaleMode === mode.value
+                        ? "bg-[rgba(254,129,212,0.15)] border-[rgba(254,129,212,0.3)] text-[var(--color-pink)] shadow-[0_0_12px_rgba(254,129,212,0.2)] text-glow"
+                        : "bg-[rgba(255,255,255,0.02)] border-[rgba(255,255,255,0.05)] text-[var(--text-secondary)] hover:bg-[rgba(255,255,255,0.05)] hover:border-[rgba(255,255,255,0.1)]"
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+
+              {upscaleMode === "fsr" && (
+                <div className="flex flex-col gap-2 pt-1">
+                  <div className="flex justify-between text-[10px] text-[var(--text-secondary)] font-bold">
+                    <span>Sharpness</span>
+                    <span className="text-[var(--color-pink)] text-glow">{sharpness}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0" max="100" step="1"
+                    value={sharpness}
+                    onChange={async (e) => {
+                      const val = parseInt(e.target.value);
+                      setSharpness(val);
+                      await invoke("set_upscale_sharpness", { value: val / 100 });
+                      showOsd(`Sharpness: ${val}%`);
+                      resetTimeout();
+                    }}
+                    className="w-full h-1 bg-[rgba(255,255,255,0.1)] rounded-lg appearance-none cursor-pointer accent-[var(--color-pink)]"
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Presets */}
             <div className="space-y-4">
               <h3 className="text-[10px] font-bold tracking-[0.2em] text-[var(--color-yellow)] uppercase border-b border-[rgba(255,255,255,0.1)] pb-2 flex items-center gap-2">

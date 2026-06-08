@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion } from "framer-motion";
-import { Play, Pause, Volume2, VolumeX, Settings, List, Maximize, Minimize, Captions, Repeat, Camera } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Settings, List, Maximize, Minimize, Captions, Repeat, Camera, ListMusic, SkipBack, SkipForward, Activity } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "../App.css";
 
@@ -10,24 +10,34 @@ interface Telemetry {
   time: number;
   duration: number;
   paused: boolean;
+  hwdec: string;
+  vformat: string;
+  vid: string;
+  sig_peak: number;
+  fps: number;
+  dropped_frames: number;
+  av_sync: number;
+  playlist_pos: number;
+  playlist_count: number;
+  current_filename: string;
+  upscale_mode: string;
 }
 
 export default function ControlBar({
-  showSettings,
-  setShowSettings,
-  showChapters,
-  setShowChapters,
-  showTracks,
-  setShowTracks,
-  isIdle
+  showSettings, setShowSettings,
+  showChapters, setShowChapters,
+  showTracks, setShowTracks,
+  showPlaylist, setShowPlaylist,
+  showVisualizers, setShowVisualizers,
+  isIdle, vformat
 }: {
-  showSettings: boolean;
-  setShowSettings: (s: boolean) => void;
-  showChapters: boolean;
-  setShowChapters: (s: boolean) => void;
-  showTracks: boolean;
-  setShowTracks: (s: boolean) => void;
+  showSettings: boolean; setShowSettings: (s: boolean) => void;
+  showChapters: boolean; setShowChapters: (s: boolean) => void;
+  showTracks: boolean; setShowTracks: (s: boolean) => void;
+  showPlaylist: boolean; setShowPlaylist: (s: boolean) => void;
+  showVisualizers: boolean; setShowVisualizers: (s: boolean) => void;
   isIdle: boolean;
+  vformat: string;
 }) {
   const appWindow = getCurrentWindow();
   const [isPlaying, setIsPlaying] = useState(false);
@@ -40,6 +50,7 @@ export default function ControlBar({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+  const [playlistCount, setPlaylistCount] = useState(0);
 
   const showOsd = (message: string) => {
     window.dispatchEvent(new CustomEvent('show-osd', { detail: message }));
@@ -63,6 +74,9 @@ export default function ControlBar({
       }
       setCurrentTime(formatTime(event.payload.time));
       setDurationSecs(event.payload.duration);
+      if (event.payload.playlist_count !== undefined) {
+        setPlaylistCount(event.payload.playlist_count);
+      }
     });
 
     const handleKeyDown = async (e: KeyboardEvent) => {
@@ -114,6 +128,20 @@ export default function ControlBar({
             if (newVol === 0 && !isMuted) setIsMuted(true);
             return newVol;
           });
+          break;
+        case 'n':
+          e.preventDefault();
+          await invoke("playlist_next");
+          showOsd("Next Track");
+          break;
+        case 'p':
+          e.preventDefault();
+          await invoke("playlist_prev");
+          showOsd("Previous Track");
+          break;
+        case 'i':
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('show-stats'));
           break;
       }
     };
@@ -200,9 +228,6 @@ export default function ControlBar({
   };
 
   const takeScreenshot = async () => {
-    // Generate a timestamped filename in the user's Pictures folder (or let backend handle it)
-    // For now, let's just pass a default name and the backend can save it. Wait, the backend screenshot command takes a path.
-    // Let's use the tauri path API to get Pictures dir.
     try {
       const { pictureDir, join } = await import('@tauri-apps/api/path');
       const dir = await pictureDir();
@@ -218,36 +243,63 @@ export default function ControlBar({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 50 }}
-      animate={{ opacity: isIdle ? 0 : 1, y: isIdle ? 50 : 0 }}
-      exit={{ opacity: 0, y: 50 }}
-      transition={{ type: "spring", stiffness: 200, damping: 20 }}
-      className={`absolute bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-5xl z-50 glass-panel rounded-3xl p-4 flex items-center gap-6 no-drag-region ${isIdle ? 'pointer-events-none' : ''}`}
+      initial={{ opacity: 0, y: 100 }}
+      animate={{ opacity: isIdle ? 0 : 1, y: isIdle ? 100 : 0 }}
+      exit={{ opacity: 0, y: 100 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className={`absolute bottom-0 left-0 w-full z-50 glass-panel border-t border-b-0 border-x-0 !rounded-none p-4 flex items-center gap-6 no-drag-region ${isIdle ? 'pointer-events-none' : ''}`}
     >
-      <button
-        onClick={togglePlayPause}
-        className="w-12 h-12 shrink-0 rounded-full bg-gradient-to-tr from-[var(--color-pink)] to-[var(--color-peach)] flex items-center justify-center text-black shadow-[0_0_20px_rgba(254,129,212,0.4)] hover:scale-110 transition-transform cursor-pointer"
-      >
-        {isPlaying ? <Pause size={20} className="fill-black" /> : <Play size={20} className="fill-black translate-x-0.5" />}
-      </button>
+      <div className="flex gap-2 shrink-0 border-r border-[rgba(255,255,255,0.1)] pr-6">
+        {playlistCount > 1 && (
+          <button
+            onClick={async () => { await invoke("playlist_prev"); showOsd("Previous Track"); }}
+            className="w-10 h-10 shrink-0 flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.1)] transition-all cursor-pointer"
+            title="Previous Track"
+          >
+            <SkipBack size={16} />
+          </button>
+        )}
 
-      <div className="flex-1 flex items-center gap-4">
-        <span className="text-[10px] font-bold tracking-widest text-[var(--text-secondary)] w-14 text-right select-none">{currentTime}</span>
+        <button
+          onClick={togglePlayPause}
+          className="w-10 h-10 shrink-0 bg-[var(--color-pink)] flex items-center justify-center text-black shadow-[0_0_20px_rgba(254,129,212,0.4)] hover:scale-105 transition-transform cursor-pointer"
+        >
+          {isPlaying ? <Pause size={18} className="fill-black" /> : <Play size={18} className="fill-black translate-x-0.5" />}
+        </button>
+
+        {playlistCount > 1 && (
+          <button
+            onClick={async () => { await invoke("playlist_next"); showOsd("Next Track"); }}
+            className="w-10 h-10 shrink-0 flex items-center justify-center text-[var(--text-secondary)] hover:text-white hover:bg-[rgba(255,255,255,0.1)] transition-all cursor-pointer"
+            title="Next Track"
+          >
+            <SkipForward size={16} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 flex items-center gap-4 group">
+        <span className="text-[10px] font-mono tracking-[0.2em] text-[var(--color-yellow)] w-16 text-right select-none">{currentTime}</span>
         
         <div 
-          className="h-2 flex-1 bg-[rgba(255,255,255,0.05)] rounded-full cursor-pointer relative group overflow-hidden border border-[rgba(255,255,255,0.05)]"
+          className="h-1 flex-1 bg-[rgba(255,255,255,0.1)] cursor-pointer relative overflow-visible"
           onClick={handleSeek}
         >
           <div
-            className="absolute top-0 left-0 h-full bg-gradient-to-r from-[var(--color-pink)] to-[var(--color-yellow)] rounded-full transition-all duration-100 ease-linear shadow-[0_0_10px_var(--color-pink)]"
+            className="absolute top-0 left-0 h-full bg-[var(--color-pink)] transition-all duration-100 ease-linear shadow-[0_0_10px_var(--color-pink)]"
             style={{ width: `${progress}%` }}
+          />
+          {/* Seek Scrubber Dot */}
+          <div 
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white border border-[var(--color-pink)] rounded-none shadow-[0_0_15px_var(--color-pink)] opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ left: `calc(${progress}% - 6px)` }}
           />
         </div>
         
-        <span className="text-[10px] font-bold tracking-widest text-[var(--text-secondary)] w-14 select-none">{durationStr}</span>
+        <span className="text-[10px] font-mono tracking-[0.2em] text-[var(--text-secondary)] w-16 select-none">{durationStr}</span>
       </div>
 
-      <div className="flex gap-4 items-center text-[var(--text-secondary)] pl-4 border-l border-[rgba(255,255,255,0.1)]">
+      <div className="flex gap-4 items-center text-[var(--text-secondary)] pl-6 border-l border-[rgba(255,255,255,0.1)]">
         
         <div
           className="relative flex items-center"
@@ -255,7 +307,7 @@ export default function ControlBar({
           onMouseLeave={() => setShowVolumeSlider(false)}
         >
           <button className="hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer z-10" onClick={toggleMute}>
-            {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+            {isMuted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
 
           <div className={`overflow-hidden transition-all duration-300 ease-out flex items-center ${showVolumeSlider ? 'w-20 opacity-100 ml-3' : 'w-0 opacity-0 ml-0'}`}>
@@ -273,7 +325,7 @@ export default function ControlBar({
           onClick={takeScreenshot}
           title="Take Screenshot"
         >
-          <Camera size={18} />
+          <Camera size={16} />
         </button>
 
         <button
@@ -281,31 +333,54 @@ export default function ControlBar({
           onClick={toggleLoop}
           title="Toggle Repeat"
         >
-          <Repeat size={18} />
+          <Repeat size={16} />
         </button>
+
+        {vformat === "Unknown" && (
+          <button
+            className={`hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer ${showVisualizers ? 'text-[var(--color-peach)] text-glow' : ''}`}
+            onClick={() => { setShowVisualizers(!showVisualizers); setShowSettings(false); setShowChapters(false); setShowTracks(false); setShowPlaylist(false); }}
+            title="Audio Visualizers"
+          >
+            <Activity size={16} />
+          </button>
+        )}
 
         <button
           className={`hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer ${showTracks ? 'text-[var(--color-peach)]' : ''}`}
-          onClick={() => { setShowTracks(!showTracks); setShowSettings(false); setShowChapters(false); }}
+          onClick={() => { setShowTracks(!showTracks); setShowSettings(false); setShowChapters(false); setShowVisualizers(false); setShowPlaylist(false); }}
           title="Subtitles & Audio"
         >
-          <Captions size={18} />
+          <Captions size={16} />
         </button>
 
         <button
           className={`hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer ${showChapters ? 'text-[var(--color-yellow)]' : ''}`}
-          onClick={() => { setShowChapters(!showChapters); setShowSettings(false); setShowTracks(false); }}
+          onClick={() => { setShowChapters(!showChapters); setShowSettings(false); setShowTracks(false); setShowVisualizers(false); setShowPlaylist(false); }}
           title="Chapters"
         >
-          <List size={18} />
+          <List size={16} />
         </button>
         
         <button
+          className={`relative hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer ${showPlaylist ? 'text-[var(--color-pink)]' : ''}`}
+          onClick={() => { setShowPlaylist(!showPlaylist); setShowSettings(false); setShowChapters(false); setShowTracks(false); setShowVisualizers(false); }}
+          title="Playlist"
+        >
+          <ListMusic size={16} />
+          {playlistCount > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-[var(--color-pink)] text-black text-[8px] font-bold w-4 h-4 flex items-center justify-center shadow-[0_0_8px_rgba(254,129,212,0.5)]">
+              {playlistCount > 99 ? '99+' : playlistCount}
+            </span>
+          )}
+        </button>
+
+        <button
           className={`hover:text-[var(--color-yellow)] transition-colors hover:scale-110 transform cursor-pointer ${showSettings ? 'text-[var(--color-yellow)] rotate-90' : ''}`}
-          onClick={() => { setShowSettings(!showSettings); setShowChapters(false); setShowTracks(false); }}
+          onClick={() => { setShowSettings(!showSettings); setShowChapters(false); setShowTracks(false); setShowPlaylist(false); setShowVisualizers(false); }}
           title="Settings"
         >
-          <Settings size={18} />
+          <Settings size={16} />
         </button>
 
         <button
@@ -313,7 +388,7 @@ export default function ControlBar({
           onClick={toggleFullscreen}
           title="Fullscreen"
         >
-          {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
         </button>
       </div>
     </motion.div>

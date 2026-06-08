@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Niro Media",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "identifier": "com.niromedia.player",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -19,7 +19,8 @@
         "transparent": true,
         "minWidth": 400,
         "minHeight": 300,
-        "theme": "Dark"
+        "theme": "Dark",
+        "dragDropEnabled": true
       }
     ],
     "security": {
@@ -34,7 +35,11 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "libmpv-2.dll"
+      "libmpv-2.dll",
+      "shaders/FSR.glsl",
+      "shaders/Anime4K_Clamp_Highlights.glsl",
+      "shaders/Anime4K_Restore_CNN_S.glsl",
+      "shaders/Anime4K_Upscale_CNN_x2_S.glsl"
     ],
     "icon": [
       "icons/32x32.png",

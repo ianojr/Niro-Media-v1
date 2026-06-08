@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Languages, Captions } from "lucide-react";
+import { X, Languages, Captions, Plus } from "lucide-react";
 import "../App.css";
 
 interface Track {
@@ -106,6 +107,31 @@ export default function TrackMenu({
               >
                 <span className={`text-xs font-bold truncate pr-2 ${activeSub === "no" ? 'text-[var(--color-peach)] text-glow' : 'text-[var(--text-primary)] group-hover:text-[var(--color-peach)]'}`}>
                   Off
+                </span>
+              </div>
+
+              <div
+                onClick={async () => {
+                  try {
+                    const selected = await open({
+                      multiple: false,
+                      filters: [{
+                        name: 'Subtitles',
+                        extensions: ['srt', 'ass', 'ssa', 'vtt', 'sub', 'idx']
+                      }]
+                    });
+                    if (selected) {
+                      await invoke("load_subtitle", { path: selected as string });
+                    }
+                  } catch (err) {
+                    console.error("Failed to load subtitle:", err);
+                  }
+                }}
+                className="group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors border border-dashed border-[rgba(255,255,255,0.1)] hover:bg-[rgba(254,166,129,0.1)] hover:border-[rgba(254,166,129,0.3)]"
+              >
+                <Plus size={14} className="text-[var(--color-peach)]" />
+                <span className="text-xs font-bold text-[var(--text-secondary)] group-hover:text-[var(--color-peach)] transition-colors">
+                  Load External Subtitle
                 </span>
               </div>
 

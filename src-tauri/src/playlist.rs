@@ -29,7 +29,9 @@ pub fn scan_folder_for_episodes(folder_path: String) -> Result<String, String> {
                 let filepath = path_buf.to_string_lossy().to_string();
                 
                 // Simple extension filter
-                if !filename.ends_with(".mkv") && !filename.ends_with(".mp4") && !filename.ends_with(".avi") {
+                let lower_name = filename.to_lowercase();
+                let media_exts = [".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v", ".flv", ".wmv", ".ts", ".mp3", ".flac", ".wav", ".ogg", ".aac", ".m4a"];
+                if !media_exts.iter().any(|ext| lower_name.ends_with(ext)) {
                     continue;
                 }
 

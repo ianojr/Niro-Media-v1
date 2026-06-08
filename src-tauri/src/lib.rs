@@ -9,6 +9,9 @@ use player::{
     set_chapter, next_chapter, previous_chapter,
     set_audio_track, set_audio_delay, set_audio_channels, set_audio_filter,
     set_video_color, set_panscan, toggle_deinterlace, take_screenshot, set_property_string,
+    playlist_load_multiple, playlist_append_multiple, playlist_next, playlist_prev, playlist_clear, playlist_play_index, playlist_remove,
+    set_upscale_mode, set_upscale_sharpness,
+    load_subtitle,
 };
 
 mod history;
@@ -148,6 +151,16 @@ pub fn run() {
             take_screenshot,
             player::set_tone_mapping,
             player::set_property_string,
+            playlist_load_multiple,
+            playlist_append_multiple,
+            playlist_next,
+            playlist_prev,
+            playlist_clear,
+            playlist_play_index,
+            playlist_remove,
+            set_upscale_mode,
+            set_upscale_sharpness,
+            load_subtitle,
             get_custom_themes,
             start_transcode,
             check_dependency,
@@ -165,13 +178,13 @@ pub fn run() {
 
             let _ = app.global_shortcut().on_shortcut("MediaNextTrack", |app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
-                    let _ = player::next_chapter(app.clone());
+                    let _ = player::playlist_next(app.clone());
                 }
             });
 
             let _ = app.global_shortcut().on_shortcut("MediaPrevTrack", |app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
-                    let _ = player::previous_chapter(app.clone());
+                    let _ = player::playlist_prev(app.clone());
                 }
             });
 
@@ -187,6 +200,7 @@ pub fn run() {
                     });
                 }
             }
+
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -4,12 +4,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "framer-motion";
-import { Play } from "lucide-react";
+import { Play, FolderOpen } from "lucide-react";
 import HardwareBadge from "./components/HardwareBadge";
 import ControlBar from "./components/ControlBar";
 import SettingsPanel from "./components/SettingsPanel";
 import ChapterMenu from "./components/ChapterMenu";
 import TrackMenu from "./components/TrackMenu";
+import PlaylistPanel from "./components/PlaylistPanel";
+import VisualizerMenu from "./components/VisualizerMenu";
 import OSD from "./components/OSD";
 import CorruptModal from "./components/CorruptModal";
 import "./App.css";
@@ -19,6 +21,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [showTracks, setShowTracks] = useState(false);
+  const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showVisualizers, setShowVisualizers] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [vformat, setVformat] = useState("Loading");
   const [isIdle, setIsIdle] = useState(false);
   const idleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,8 +51,47 @@ export default function App() {
         setVformat(e.payload.vformat);
       }
     });
+
+    // Handle drag-and-drop using Tauri v2's native window API
+    const unlistenDragDrop = appWindow.onDragDropEvent((event) => {
+      if (event.payload.type === "enter") {
+        setIsDragOver(true);
+      } else if (event.payload.type === "leave") {
+        setIsDragOver(false);
+      } else if (event.payload.type === "drop") {
+        setIsDragOver(false);
+        const paths = event.payload.paths;
+        const mediaExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'mp3', 'wav', 'flac', 'aac', 'ogg', 'wma', 'm4a', 'mka'];
+        const subtitleExts = ['srt', 'ass', 'ssa', 'vtt', 'sub', 'idx'];
+        
+        const mediaPaths = paths.filter((p: string) => {
+          const ext = p.split('.').pop()?.toLowerCase() || '';
+          return mediaExts.includes(ext);
+        });
+        const subtitlePaths = paths.filter((p: string) => {
+          const ext = p.split('.').pop()?.toLowerCase() || '';
+          return subtitleExts.includes(ext);
+        });
+
+        // Load subtitle files onto the current video
+        if (subtitlePaths.length > 0 && hasMedia) {
+          for (const subPath of subtitlePaths) {
+            invoke("load_subtitle", { path: subPath }).catch(console.error);
+          }
+        }
+
+        // Load media files
+        if (mediaPaths.length === 1) {
+          loadMedia(mediaPaths[0]);
+        } else if (mediaPaths.length > 1) {
+          loadMultipleFiles(mediaPaths);
+        }
+      }
+    });
+
     return () => {
       unlistenTime.then(f => f());
+      unlistenDragDrop.then(f => f());
     };
   }, []);
 
@@ -61,6 +105,17 @@ export default function App() {
       alert("Error loading media: " + e);
     }
   };
+
+  async function loadMultipleFiles(paths: string[]) {
+    try {
+      await invoke("init_player");
+      await invoke("playlist_load_multiple", { paths });
+      setHasMedia(true);
+      await invoke("toggle_play", { pause: false });
+    } catch (e) {
+      console.error("Failed to load playlist:", e);
+    }
+  }
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
@@ -100,6 +155,28 @@ export default function App() {
     }
   };
 
+  const openFolderDialog = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selected) {
+        const result = await invoke("scan_folder_for_episodes", { folderPath: selected as string }) as string;
+        const episodes = JSON.parse(result);
+        if (episodes.length > 0) {
+          const paths = episodes.map((ep: any) => ep.filepath);
+          await invoke("init_player");
+          await invoke("playlist_load_multiple", { paths });
+          setHasMedia(true);
+          await invoke("toggle_play", { pause: false });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleBackgroundClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.glass-panel') || (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.drag-region')) return;
     invoke("toggle_pause");
@@ -113,10 +190,24 @@ export default function App() {
 
   return (
     <div 
-      className={`relative w-full h-screen text-[var(--text-primary)] flex flex-col items-center justify-center font-sans overflow-hidden transition-colors duration-1000 ${hasMedia ? 'bg-transparent' : 'bg-[var(--theme-base)]'} ${isIdle && hasMedia ? 'cursor-none' : ''}`}
+      className={`relative w-full h-screen text-[var(--text-primary)] flex flex-col items-center justify-center font-sans overflow-hidden transition-colors duration-1000 ${hasMedia ? 'bg-transparent' : 'bg-[var(--theme-base)]'} ${isIdle && hasMedia ? 'cursor-none' : ''} ${isDragOver ? 'ring-2 ring-[var(--accent-pink)] ring-inset' : ''}`}
       onClick={handleBackgroundClick}
       onDoubleClick={handleBackgroundDoubleClick}
     >
+
+      {isDragOver && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none"
+        >
+          <div className="text-center">
+            <div className="text-6xl mb-4">🎬</div>
+            <p className="text-white text-2xl font-light">Drop files to play</p>
+            <p className="text-white/50 text-sm mt-2">Drop multiple files to create a playlist</p>
+          </div>
+        </motion.div>
+      )}
       
       {/* Titlebar Drag Region and Window Controls */}
       <div data-tauri-drag-region className={`absolute top-0 w-full h-12 z-[60] drag-region flex justify-end items-center px-6 gap-3 transition-opacity duration-500 ${isIdle && hasMedia ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
@@ -150,96 +241,74 @@ export default function App() {
       <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} />
       <ChapterMenu isOpen={showChapters} onClose={() => setShowChapters(false)} />
       <TrackMenu isOpen={showTracks} onClose={() => setShowTracks(false)} />
+      <PlaylistPanel isOpen={showPlaylist} onClose={() => setShowPlaylist(false)} />
+      <VisualizerMenu isOpen={showVisualizers} onClose={() => setShowVisualizers(false)} />
 
       {/* Main UI */}
       {!hasMedia ? (
         <motion.div 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center space-y-8 z-10 no-drag-region"
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: { opacity: 0 },
+            visible: { opacity: 1, transition: { staggerChildren: 0.2 } }
+          }}
+          className="w-full max-w-4xl px-12 z-10 no-drag-region flex flex-col justify-center"
         >
-          <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[var(--color-pink)] to-[var(--color-yellow)] p-[2px] mx-auto shadow-[0_0_80px_rgba(254,129,212,0.4)]">
-            <div className="w-full h-full bg-[var(--theme-base)] rounded-full flex items-center justify-center cursor-pointer hover:bg-black/50 transition-colors" onClick={openFileDialog}>
-              <Play className="text-[var(--color-peach)] translate-x-1" size={48} strokeWidth={1} />
-            </div>
-          </div>
-          
-          <div className="space-y-3">
-            <h1 className="text-4xl font-bold tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-[var(--color-pink)] via-[var(--color-peach)] to-[var(--color-yellow)] pointer-events-none select-none">
-              NIRO MEDIA
+          <motion.div variants={{ hidden: { opacity: 0, x: -50 }, visible: { opacity: 1, x: 0 } }}>
+            <h1 className="text-8xl font-display font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-[var(--color-pink)] to-[var(--color-peach)] leading-none select-none mb-2">
+              NIRO
             </h1>
-            <p className="text-xs tracking-[0.4em] text-[var(--text-secondary)] uppercase">
-              Engine Ready &bull; Awaiting Media
-            </p>
-          </div>
+            <h2 className="text-6xl font-display font-bold tracking-[0.2em] text-white/90 leading-none select-none">
+              MEDIA
+            </h2>
+          </motion.div>
+          
+          <motion.div variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }} className="mt-8 h-[1px] w-full bg-gradient-to-r from-[var(--color-pink)] to-transparent opacity-50" />
 
-          <button
-            onClick={openFileDialog}
-            className="mt-8 px-10 py-4 rounded-full bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] hover:bg-[rgba(255,255,255,0.1)] text-xs font-bold tracking-[0.2em] uppercase transition-all cursor-pointer"
-          >
-            Open File
-          </button>
+          <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }} className="mt-8">
+            <p className="text-sm font-mono text-[var(--color-yellow)] uppercase tracking-[0.3em] mb-8">
+              System Ready <span className="opacity-50">/ Awaiting Input</span>
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={openFileDialog}
+                className="group relative px-8 py-4 bg-black/40 border border-[var(--color-pink)] hover:bg-[rgba(254,129,212,0.1)] transition-all cursor-pointer overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-[var(--color-pink)] to-transparent opacity-0 group-hover:opacity-20 transition-opacity" />
+                <span className="relative z-10 font-display text-sm tracking-[0.2em] font-bold text-white group-hover:text-[var(--color-pink)] flex items-center gap-3">
+                  <Play size={16} /> LOAD FILE
+                </span>
+              </button>
+              
+              <button
+                onClick={openFolderDialog}
+                className="group relative px-8 py-4 bg-black/40 border border-[var(--theme-border)] hover:border-[var(--color-yellow)] hover:bg-[rgba(255,234,187,0.05)] transition-all cursor-pointer overflow-hidden"
+              >
+                <span className="relative z-10 font-display text-sm tracking-[0.2em] font-bold text-[var(--text-secondary)] group-hover:text-[var(--color-yellow)] flex items-center gap-3">
+                  <FolderOpen size={16} /> SCAN FOLDER
+                </span>
+              </button>
+            </div>
+          </motion.div>
         </motion.div>
       ) : (
         <>
-          {/* Audio Visualizer Fallback (Only shows if MPV has no video output and window remains transparent) */}
+          {/* Cyber-Elegance UI Overlay wrapper */}
           {vformat === "Unknown" && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center -z-10 bg-black/60 backdrop-blur-3xl">
-              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-                {/* Dancing Glowing Orbs / Particles */}
-                <motion.div 
-                  animate={{ 
-                    scale: [1, 1.2, 0.9, 1.1, 1],
-                    opacity: [0.3, 0.6, 0.3, 0.8, 0.3],
-                    rotate: [0, 90, 180, 270, 360]
-                  }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute w-[800px] h-[800px] rounded-full border border-[var(--color-pink)] opacity-30 mix-blend-screen"
-                  style={{ boxShadow: "0 0 150px var(--color-pink), inset 0 0 100px var(--color-pink)" }}
-                />
-                <motion.div 
-                  animate={{ 
-                    scale: [0.8, 1.3, 1, 1.2, 0.8],
-                    opacity: [0.2, 0.5, 0.2, 0.7, 0.2],
-                    rotate: [360, 270, 180, 90, 0]
-                  }}
-                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
-                  className="absolute w-[600px] h-[600px] rounded-full border-[2px] border-[var(--color-yellow)] opacity-30 mix-blend-screen"
-                  style={{ boxShadow: "0 0 120px var(--color-yellow), inset 0 0 80px var(--color-yellow)" }}
-                />
-                <motion.div 
-                  animate={{ 
-                    scale: [1.1, 0.9, 1.3, 0.8, 1.1],
-                    opacity: [0.4, 0.8, 0.3, 0.9, 0.4]
-                  }}
-                  transition={{ duration: 1.2, repeat: Infinity, ease: "anticipate" }}
-                  className="absolute w-[400px] h-[400px] rounded-full bg-gradient-to-tr from-[var(--color-pink)] to-[var(--color-peach)] mix-blend-screen blur-[100px]"
-                />
-                <div className="absolute flex flex-col items-center justify-center">
-                  <div className="text-sm font-bold tracking-[0.5em] text-white/50 uppercase mb-4">Playing Audio</div>
-                  <div className="flex gap-2 items-end h-16">
-                    {[1,2,3,4,5,6,7,8,9,10,11,12].map((i) => (
-                      <motion.div 
-                        key={i}
-                        animate={{ height: ["10%", `${Math.random() * 80 + 20}%`, "10%"] }}
-                        transition={{ duration: 0.4 + Math.random() * 0.4, repeat: Infinity, ease: "easeInOut" }}
-                        className="w-2 bg-[var(--color-yellow)] rounded-full shadow-[0_0_10px_var(--color-yellow)]"
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <div className="absolute top-12 left-6 text-xs font-mono text-[var(--color-pink)] opacity-50 tracking-[0.3em] uppercase pointer-events-none z-0">
+              AUDIO MODE / VISUALIZER ACTIVE
             </div>
           )}
 
           <ControlBar 
-            showSettings={showSettings} 
-            setShowSettings={setShowSettings}
-            showChapters={showChapters}
-            setShowChapters={setShowChapters}
-            showTracks={showTracks}
-            setShowTracks={setShowTracks}
-            isIdle={isIdle}
+            isIdle={isIdle} 
+            vformat={vformat}
+            showSettings={showSettings} setShowSettings={setShowSettings}
+            showChapters={showChapters} setShowChapters={setShowChapters}
+            showTracks={showTracks} setShowTracks={setShowTracks}
+            showPlaylist={showPlaylist} setShowPlaylist={setShowPlaylist}
+            showVisualizers={showVisualizers} setShowVisualizers={setShowVisualizers}
           />
         </>
       )}
